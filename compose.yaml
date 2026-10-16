@@ -1,0 +1,125 @@
+name: documind
+services:
+  llm-service:
+    image: ollama/ollama:0.6.8
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [private, outbound]
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    restart: unless-stopped
+  vectordb-service:
+    image: qdrant/qdrant:v1.13.6
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [private]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    restart: unless-stopped
+  api-backend:
+    build: ./backend
+    environment: &backend-environment
+      OLLAMA_URL: http://llm-service:11434
+      QDRANT_URL: http://vectordb-service:6333
+      CHAT_MODEL: ${CHAT_MODEL:-qwen2.5:3b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      DATA_DIR: /app/data
+      REDIS_URL: redis://redis-service:6379/0
+    volumes:
+      - documents_data:/app/data
+    networks: [private]
+    depends_on:
+      redis-service:
+        condition: service_healthy
+      llm-service:
+        condition: service_healthy
+      vectordb-service:
+        condition: service_started
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+    restart: unless-stopped
+  redis-service:
+    image: redis:7.4.2-alpine
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec]
+    volumes:
+      - redis_data:/data
+    networks: [private]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+    restart: unless-stopped
+  document-worker:
+    build: ./backend
+    environment: *backend-environment
+    command: [celery, -A, app.queue:celery, worker, --loglevel=info, --concurrency=1, --hostname=worker@%h]
+    volumes:
+      - documents_data:/app/data
+    networks: [private]
+    depends_on:
+      redis-service:
+        condition: service_healthy
+      api-backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'celery -A app.queue:celery inspect ping --timeout=5 --destination=worker@$$HOSTNAME']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+    restart: unless-stopped
+  web-client:
+    build: ./frontend
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3000}:8080'
+    networks: [private, edge]
+    depends_on:
+      api-backend:
+        condition: service_started
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+networks:
+  private:
+    internal: true
+  outbound: {}
+  edge: {}
+volumes:
+  ollama_data:
+  qdrant_data:
+  documents_data:
+  redis_data:

@@ -1,0 +1,17 @@
+{
+  "name": "documind-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 8080",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "vite": "6.4.4"
+  }
+}

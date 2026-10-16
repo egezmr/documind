@@ -1,0 +1,14 @@
+services:
+  api-backend:
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, '8000', --reload]
+    volumes:
+      - ./backend/app:/app/app:ro
+  web-client:
+    build:
+      context: ./frontend
+      target: development
+    volumes:
+      - ./frontend/src:/app/src:ro
+  document-worker:
+    volumes:
+      - ./backend/app:/app/app:ro
